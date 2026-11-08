@@ -15,6 +15,11 @@
           <items>
             <AnchorPane id="left-pane" prefHeight="160.0" prefWidth="100.0" SplitPane.resizableWithParent="false">
               <children>
+                <SplitPane id="hierarchy-split" dividerPositions="0.4" orientation="VERTICAL" AnchorPane.bottomAnchor="0.0" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="0.0">
+                  <items>
+                    <AnchorPane id="hierarchy-container" minHeight="100.0" prefHeight="100.0" prefWidth="160.0" />
+                    <AnchorPane prefHeight="100.0" prefWidth="160.0">
+                      <children>
                 <SplitPane id="assets-split" dividerPositions="0.5746666666666667" layoutX="24.0" layoutY="398.0" orientation="VERTICAL" prefHeight="200.0" prefWidth="160.0" AnchorPane.bottomAnchor="0.0" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="0.0">
                   <items>
                     <AnchorPane prefHeight="100.0" prefWidth="160.0">
@@ -58,6 +63,10 @@
                             </AnchorPane>
                           </content>
                         </TitledPane>
+                      </children>
+                    </AnchorPane>
+                  </items>
+                </SplitPane>
                       </children>
                     </AnchorPane>
                   </items>

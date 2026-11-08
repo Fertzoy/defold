@@ -324,12 +324,14 @@
   (boolean (some-> resource resource/resource-type :tags (contains? :debuggable))))
 
 (g/defnk produce-active-sidebar
-  [active-view active-resource open-sidebar-panes debugger-sidebar-panes outline-active ^:try properties-pane-desc]
+  [active-view active-resource open-sidebar-panes debugger-sidebar-panes ^:try properties-pane-desc]
   (if (and debugger-sidebar-panes (debuggable-resource? active-resource))
     debugger-sidebar-panes
     (coll/into-> (get open-sidebar-panes active-view) []
       (keep #(case %
-               :outline-pane (when outline-active {:fx/type fx/ext-get-ref :ref :outline-pane})
+               ;; The outline (Hierarchy) lives in its own permanent container
+               ;; in the left column, see produce-hierarchy-desc.
+               :outline-pane nil
                :properties-pane properties-pane-desc
                %)))))
 
@@ -337,32 +339,43 @@
   (and (not (g/error-value? outline-pane-desc))
        (coll/any? #(= :outline-pane %) (get open-sidebar-panes active-view))))
 
-(g/defnk produce-right-split-desc [right-split active-sidebar ^:try outline-pane-desc]
+(def ^:private ext-with-anchor-pane-props
+  (fx/make-ext-with-props fx.anchor-pane/props))
+
+(g/defnk produce-hierarchy-desc [hierarchy-container ^:try outline-pane-desc]
+  ;; The outline stays mounted for as long as the editor is open, so it keeps
+  ;; its expansion state and stays up to date. This is necessary because the
+  ;; outline view defines commands on the :workbench context, which is available
+  ;; throughout the editor, and those commands expect the outline view to be up
+  ;; to date. We need to keep the `^:try` so that a broken outline does not fail
+  ;; this whole output.
   {:fx/type fxui/ext-dedupe-identical-desc
-   :desc {:fx/type fx/ext-let-refs
-          ;; We want to ensure that the outline stays mounted even if it's
-          ;; hidden, so it keeps its expansion state and stays up to date.
-          ;; This is necessary because the outline view defines commands on the
-          ;; :workbench context, which is available throughout the editor, and
-          ;; those commands expect the outline view to be up to date. We need
-          ;; to keep the `^:try` so that the broken outline does not fail this
-          ;; whole output
-          :refs (if (g/error-value? outline-pane-desc)
-                  {}
-                  {:outline-pane outline-pane-desc})
-          :desc {:fx/type ext-with-split-pane-props
-                 :desc {:fx/type ui/ext-value :value right-split}
-                 :props {:items (or (coll/not-empty
-                                      (coll/into-> active-sidebar []
-                                        (remove g/error-value?)
-                                        (map split-pane-item)))
-                                    [(split-pane-item {:fx/type fx.region/lifecycle})])}}}})
+   :desc {:fx/type ext-with-anchor-pane-props
+          :desc {:fx/type ui/ext-value :value hierarchy-container}
+          :props {:children [(assoc (if (g/error-value? outline-pane-desc)
+                                      {:fx/type fx.region/lifecycle}
+                                      outline-pane-desc)
+                               :anchor-pane/left 0.0
+                               :anchor-pane/right 0.0
+                               :anchor-pane/top 0.0
+                               :anchor-pane/bottom 0.0)]}}})
+
+(g/defnk produce-right-split-desc [right-split active-sidebar]
+  {:fx/type fxui/ext-dedupe-identical-desc
+   :desc {:fx/type ext-with-split-pane-props
+          :desc {:fx/type ui/ext-value :value right-split}
+          :props {:items (or (coll/not-empty
+                               (coll/into-> active-sidebar []
+                                 (remove g/error-value?)
+                                 (map split-pane-item)))
+                             [(split-pane-item {:fx/type fx.region/lifecycle})])}}})
 
 (g/defnode AppView
   (property stage Stage)
   (property scene Scene)
   (property editor-tabs-split SplitPane)
   (property right-split SplitPane)
+  (property hierarchy-container AnchorPane)
   (property active-tab Tab)
   (property tool-tab-pane TabPane)
   (property auto-pulls g/Any)
@@ -413,6 +426,7 @@
 
   (output active-sidebar g/Any :cached produce-active-sidebar)
   (output right-split-desc g/Any :cached produce-right-split-desc)
+  (output hierarchy-desc g/Any :cached produce-hierarchy-desc)
 
   (output active-resource-node g/NodeID :cached (g/fnk [active-view open-views] (:resource-node (get open-views active-view))))
   (output active-resource-node+type g/Any :cached
@@ -698,7 +712,8 @@
                           "workbench-split"
                           "center-split"
                           "right-split"
-                          "assets-split"])
+                          "assets-split"
+                          "hierarchy-split"])
 
 (defn- existing-split-panes [^Scene scene]
   (into {}
@@ -2345,8 +2360,14 @@
              right-split-desc (g/node-value app-view :right-split-desc evaluation-context)]
     (ui/advance-ui-user-data-component! right-split ::ui right-split-desc)))
 
+(defn- refresh-hierarchy! [app-view]
+  (g/let-ec [hierarchy-container (g/node-value app-view :hierarchy-container evaluation-context)
+             hierarchy-desc (g/node-value app-view :hierarchy-desc evaluation-context)]
+    (ui/advance-ui-user-data-component! hierarchy-container ::ui hierarchy-desc)))
+
 (defn make-app-view [project ^Stage stage ^MenuBar menu-bar ^SplitPane editor-tabs-split right-split ^TabPane tool-tab-pane prefs localization]
   (let [app-scene (.getScene stage)
+        ^AnchorPane hierarchy-container (.lookup app-scene "#hierarchy-container")
         editor-tab-pane (TabPane.)]
     (ui/disable-menu-alt-key-mnemonic! menu-bar)
     (ui/init-tab-pane! tool-tab-pane)
@@ -2363,6 +2384,7 @@
                            :scene app-scene
                            :editor-tabs-split editor-tabs-split
                            :right-split right-split
+                           :hierarchy-container hierarchy-container
                            :tool-tab-pane tool-tab-pane
                            :active-tool :move
                            :manip-space :world
@@ -2411,6 +2433,8 @@
                                 (let [refresh-requested? (ui/user-data app-scene ::ui/refresh-requested?)]
                                   (when (NodeHelper/isTreeShowing right-split)
                                     (refresh-right-split! app-view))
+                                  (when (NodeHelper/isTreeShowing hierarchy-container)
+                                    (refresh-hierarchy! app-view))
                                   (when refresh-requested?
                                     (ui/user-data! app-scene ::ui/refresh-requested? false)
                                     (g/with-auto-evaluation-context evaluation-context
